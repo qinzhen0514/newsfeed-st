@@ -212,7 +212,7 @@ st.markdown(
     """ 
         > :black[**A Chatbot for News,** *powered by -  [LangChain](https://python.langchain.com/v0.2/docs/introduction/) + 
         [OpenAI](https://platform.openai.com/docs/models/gpt-4-turbo-and-gpt-4) + 
-        [Streamlit](https://streamlit.io) + 💪 **Audit DS Team***]
+        [Streamlit](https://streamlit.io) + 💪 **Audit Team***]
         """
 )
 
