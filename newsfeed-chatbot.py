@@ -67,7 +67,7 @@ def get_content_from_url(url, text_max_length=2000):
         page.download()
         page.parse()
         
-        return page.text[:text_max_length]
+        return page.text[:text_max_length].replace('$','\\\$') # Avoid unnecessary markdown display for $
     
     except:
         return 'Error'
@@ -81,7 +81,7 @@ def get_response(user_query):
 
                 The topic is: {user_query}\
 
-                Your goal is to generate many potential search queries that are relevant to the topic. To do this:\
+                Your goal is to generate many potential search queries that are relevant to the topic and valid in year 2024. To do this:\
                 - Use different keywords and phrases related to the topic \
                 - Vary the specificity of your queries, making some more narrow and others more broad\
                 - Be creative and come up with as many distinct query ideas as you can\
