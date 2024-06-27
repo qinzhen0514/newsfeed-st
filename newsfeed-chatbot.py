@@ -67,7 +67,7 @@ def get_content_from_url(url, text_max_length=2000):
         page.download()
         page.parse()
         
-        return page.text[:text_max_length].replace('$','\\\$') # Avoid unnecessary markdown display for $
+        return page.text[:text_max_length].replace('$','\\$') # Avoid unnecessary markdown display for $
     
     except:
         return 'Error'
