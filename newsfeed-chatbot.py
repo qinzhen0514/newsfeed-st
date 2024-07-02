@@ -176,7 +176,7 @@ def summarize_top5_reuslts(formatted_top5_results,user_query):
                 USER_QUESTION: {user_query}
 
                 Include as many details as possible in the answer. 
-                Please also replace the dollar sign($) as '\\$' in the answer for better markdown display.
+                Please also replace the dollar sign($) as '\$' in the answer for better markdown display.
                 Reference the relevant search result urls as markdown links.
                 
 
