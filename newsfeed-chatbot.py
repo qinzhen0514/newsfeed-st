@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate,MessagesPlaceholder
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -29,9 +29,8 @@ format_instructions = parser.get_format_instructions()
 
 # Date variables
 today = datetime.today()
-prev_30day = today - timedelta(days=30)
-today = today.strftime('%Y-%m-%d')
-prev_30day = prev_30day.strftime('%Y-%m-%d')
+prev_day = (today - timedelta(days=0)).strftime('%Y-%m-%d')
+prev_30day = (today - timedelta(days=29)).strftime('%Y-%m-%d')
 
 # Helper Functions
 def cosine_similarity(x,y):
@@ -43,11 +42,11 @@ def get_embeddings(text):
     return response
 
 # Get Response from News API
-def search_news(query, num_articles=5, from_datetime = prev_30day,to_datetime = today):
+def search_news(query, num_articles=5, from_datetime = prev_30day,to_datetime = prev_day):
     
     response = newsapi.get_everything(q=query,
-                                      from_param=prev_30day,
-                                      to=today,
+                                      from_param=from_datetime,
+                                      to=to_datetime,
                                       language='en',
                                       sort_by='relevancy',
                                       page_size=num_articles
@@ -74,7 +73,59 @@ def get_content_from_url(url, text_max_length=2000):
 
 
 # Main Functions
-def get_response(user_query):
+
+def decide_chain(user_query, chat_history):
+    decide_system_prompt = """You are an assistant good at finding recent news articles on a given topic using a NEWS API \ 
+           You have 2 tools, 'RAG' and 'Direct Answer'. Given a chat history and the latest user question, you need to decide which tool to use to respond.\
+           You will use the tool 'RAG' if the question is about news topic and you want to look up more information.\
+           You will use the tool 'Direct Answer' if the question is generic or does not pertain to any potential news topics.\
+           Question: {question}
+           Which tool do you want to use? Only reply 'RAG' or 'Direct Answer'."""
+
+    decide_prompt  = ChatPromptTemplate.from_messages(
+        [
+            ("system", decide_system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+        ]
+    )
+
+    llm = ChatOpenAI(model='gpt-4-turbo')
+
+    decide_chain = decide_prompt | llm | StrOutputParser()
+
+    return decide_chain.invoke({
+        "question": user_query,
+        "chat_history": chat_history
+        
+    })
+
+def genral_answer(user_query, chat_history):
+    general_system_prompt =  """You are an assistant good at finding recent news articles on a given topic using a NEWS API.\
+                            Please Respond to the following question:
+                            Question: {question}
+                            Answer:"""
+
+    general_prompt  = ChatPromptTemplate.from_messages(
+        [
+            ("system", general_system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+        ]
+    )
+
+    llm = ChatOpenAI(model='gpt-4o')
+    general_chain = general_prompt | llm
+
+    return general_chain.stream({
+        "question": user_query,
+        "chat_history": chat_history
+        
+    })
+
+
+
+def get_relevant_queries(user_query):
 
     template = """
                 You will be generating search queries to find recent news articles on a given topic using a NEWS API.\
@@ -217,6 +268,14 @@ st.markdown(
         """
 )
 
+st.sidebar.warning(
+        "Please be advised that this chatbot is intended for general informational purposes only. \
+         \n\nTo ensure your privacy and security, do not input any internal, sensitive, or confidential information into this chatbot. \
+         \n\nSharing proprietary data or internal BMO content is strictly prohibited. This chatbot does not have the capacity to securely handle or process such information. \
+         \n\nFor any inquiries involving sensitive information, please use the appropriate secure channels designated by BMO."
+    ,icon="⚠️")
+
+
 # Set up sidebar with various options
 with st.sidebar.expander(" 🛠️ Settings ", expanded=False):
 
@@ -259,40 +318,49 @@ if user_query is not None and user_query != "":
 
     with st.chat_message('Human', avatar="🧐"):
         st.markdown(user_query)
+    
+    tool = decide_chain(user_query, st.session_state.chat_history)
+    print(tool)
 
-    # Generate Related Queries
-    st.markdown("**Relevant Queries:**")
-    with st.chat_message("AI",avatar="🤖"):
-        response = st.write_stream(get_response(user_query))
+    if tool != 'RAG':
+        with st.chat_message("AI",avatar="🤖"):
+            response = st.write_stream(genral_answer(user_query, st.session_state.chat_history))
 
-    st.session_state.chat_history.append(AIMessage(content=response))
-    queries = json.loads(response)['queries']
-    queries.insert(0,user_query)
+        st.session_state.chat_history.append(AIMessage(content=response))
 
-    # Generate Hypothetical Answer
-    st.markdown("**Hypo Answers:**")
-    with st.chat_message("AI", avatar="🤖"):
-        response = st.write_stream(generate_hypothetical_answer(user_query))
+    else:
+        # Generate Related Queries
+        st.markdown("**Relevant Queries:**")
+        with st.chat_message("AI",avatar="🤖"):
+            response = st.write_stream(get_relevant_queries(user_query))
 
-    st.session_state.chat_history.append(AIMessage(content=response))
-    hypothetical_answer_embedding = get_embeddings(response)
+        st.session_state.chat_history.append(AIMessage(content=response))
+        queries = json.loads(response)['queries']
+        queries.insert(0,user_query)
 
+        # Generate Hypothetical Answer
+        st.markdown("**Hypo Answers:**")
+        with st.chat_message("AI", avatar="🤖"):
+            response = st.write_stream(generate_hypothetical_answer(user_query))
 
-    # Retrieving TOP5 Articles
-    with st.spinner("Retrieving Articles..."):
-        formatted_top5_results = pick_news(queries,hypothetical_answer_embedding)
-        formatted_top5_results_display = []
-        for result in formatted_top5_results:
-                formatted_top5_results_display.append('\n\n'.join([":".join([f'**{key}**',value]) for key,value in result.items()]))
-        formatted_top5_results_display = f"\n\n{'-'*50}\n\n".join(formatted_top5_results_display)
+        st.session_state.chat_history.append(AIMessage(content=response))
+        hypothetical_answer_embedding = get_embeddings(response)
 
-    st.markdown("**TOP 5 Articles:**")
-    with st.chat_message("AI", avatar="🤖"):
-        st.write(formatted_top5_results_display)
+        # Retrieving TOP5 Articles
+        with st.spinner("Retrieving Articles..."):
+            formatted_top5_results = pick_news(queries,hypothetical_answer_embedding)
+            formatted_top5_results_display = []
+            for result in formatted_top5_results:
+                    formatted_top5_results_display.append('\n\n'.join([":".join([f'**{key}**',value]) for key,value in result.items()]))
+            formatted_top5_results_display = f"\n\n{'-'*50}\n\n".join(formatted_top5_results_display)
 
-    # Summarized Output
-    st.markdown("**Summarized Output:**")
-    with st.chat_message("AI", avatar="🤖"):
-        response = st.write_stream(summarize_top5_reuslts(formatted_top5_results,user_query))
+        st.markdown("**TOP 5 Articles:**")
+        with st.chat_message("AI", avatar="🤖"):
+            st.write(formatted_top5_results_display)
 
-    st.session_state.chat_history.append(AIMessage(content=response))
+        # Summarized Output
+        st.markdown("**Summarized Output:**")
+        with st.chat_message("AI", avatar="🤖"):
+            response = st.write_stream(summarize_top5_reuslts(formatted_top5_results,user_query))
+
+        st.session_state.chat_history.append(AIMessage(content=response))
