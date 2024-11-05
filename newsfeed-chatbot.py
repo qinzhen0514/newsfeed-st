@@ -22,7 +22,7 @@ newsapi = NewsApiClient(api_key=os.getenv('news_api_key'))
 
 # Set up JSON Formatting
 class QuerySchema(BaseModel):
-    queries: list[str] = Field(description="the list of TOP 10 queries")
+    expanded_queries: list[str] = Field(description="the list of TOP 10 queries")
 
 parser = JsonOutputParser(pydantic_object=QuerySchema)
 format_instructions = parser.get_format_instructions()
@@ -66,7 +66,7 @@ def get_content_from_url(url, text_max_length=2000):
         page.download()
         page.parse()
         
-        return page.text[:text_max_length].replace('$','\\$') # Avoid unnecessary markdown display for $
+        return page.text[:text_max_length].replace('$','\\\$') # Avoid unnecessary markdown display for $
     
     except:
         return 'Error'
@@ -90,7 +90,7 @@ def decide_chain(user_query, chat_history):
         ]
     )
 
-    llm = ChatOpenAI(model='gpt-4-turbo')
+    llm = ChatOpenAI(model='gpt-4o')
 
     decide_chain = decide_prompt | llm | StrOutputParser()
 
@@ -145,9 +145,9 @@ def get_relevant_queries(user_query):
 
     prompt = PromptTemplate.from_template(template,partial_variables={"format_instructions": parser.get_format_instructions()})
     
-    llm = ChatOpenAI(model=MODEL)
+    llm = ChatOpenAI(model="gpt-4-turbo")
         
-    chain = prompt | llm 
+    chain = prompt | llm
     
     return chain.stream({
         "user_query": user_query,
@@ -209,25 +209,25 @@ def pick_news(queries,hypothetical_answer_embedding):
     sorted_articles = sorted(scored_articles, key=lambda x: x[1], reverse=True)
 
 
-    formatted_top5_results = [
+    formatted_top_results = [
         {
             "Title": article["title"],
             "Url": article["url"],
             "Content": article['content']
         }
-        for article, _score in sorted_articles[0:5]
+        for article, _score in sorted_articles[0:10]
     ]
     
-    return formatted_top5_results
+    return formatted_top_results
 
-def summarize_top5_reuslts(formatted_top5_results,user_query):
+def summarize_top_reuslts(formatted_top_results,user_query):
     template = """
                 Generate an answer to the user's question based on the given search results.
-                TOP_RESULTS: {formatted_top5_results}
+                TOP_RESULTS: {formatted_top_results}
                 USER_QUESTION: {user_query}
 
-                Include as many details as possible in the answer. 
-                Please also replace the dollar sign($) as '\$' in the answer for better markdown display.
+                Please leverage all the TOP_RESULTS to answer USER_QUESTION and include as many details as possible in the answer.
+                Please also replace the dollar sign($) as '\\$' in the answer for better markdown display.
                 Reference the relevant search result urls as markdown links.
                 
 
@@ -241,7 +241,7 @@ def summarize_top5_reuslts(formatted_top5_results,user_query):
 
     return chain.stream({
         "user_query": user_query,
-        "formatted_top5_results": formatted_top5_results
+        "formatted_top_results": formatted_top_results
     })
 
 
@@ -283,7 +283,8 @@ with st.sidebar.expander(" 🛠️ Settings ", expanded=False):
         label="LLM_Model",
         options=[
             "gpt-4-turbo",
-            "gpt-3.5-turbo"
+            "gpt-3.5-turbo",
+            "gpt-4o"
         ],
     )
     
@@ -313,8 +314,10 @@ for message in st.session_state.chat_history:
 
 # user input
 user_query = st.chat_input("Type your message here...")
+download_list = []
 if user_query is not None and user_query != "":
     st.session_state.chat_history.append(HumanMessage(content=user_query))
+    download_list.append('**User Question**: '+ '**' + user_query + '**')
 
     with st.chat_message('Human', avatar="🧐"):
         st.markdown(user_query)
@@ -335,7 +338,8 @@ if user_query is not None and user_query != "":
             response = st.write_stream(get_relevant_queries(user_query))
 
         st.session_state.chat_history.append(AIMessage(content=response))
-        queries = json.loads(response)['queries']
+
+        queries = json.loads(response)['expanded_queries']
         queries.insert(0,user_query)
 
         # Generate Hypothetical Answer
@@ -346,21 +350,28 @@ if user_query is not None and user_query != "":
         st.session_state.chat_history.append(AIMessage(content=response))
         hypothetical_answer_embedding = get_embeddings(response)
 
-        # Retrieving TOP5 Articles
+        # Retrieving TOP Articles
         with st.spinner("Retrieving Articles..."):
-            formatted_top5_results = pick_news(queries,hypothetical_answer_embedding)
-            formatted_top5_results_display = []
-            for result in formatted_top5_results:
-                    formatted_top5_results_display.append('\n\n'.join([":".join([f'**{key}**',value]) for key,value in result.items()]))
-            formatted_top5_results_display = f"\n\n{'-'*50}\n\n".join(formatted_top5_results_display)
+            formatted_top_results = pick_news(queries,hypothetical_answer_embedding)
+            formatted_top_results_display = []
+            for result in formatted_top_results:
+                    formatted_top_results_display.append('\n\n'.join(["\n\n".join([f'**{key}**',value]) for key,value in result.items()]))
+            formatted_top_results_display = f"\n\n{'-'*50}\n\n".join(formatted_top_results_display)
 
-        st.markdown("**TOP 5 Articles:**")
+        st.markdown("**TOP Articles:**")
         with st.chat_message("AI", avatar="🤖"):
-            st.write(formatted_top5_results_display)
+            st.write(formatted_top_results_display)
 
         # Summarized Output
         st.markdown("**Summarized Output:**")
         with st.chat_message("AI", avatar="🤖"):
-            response = st.write_stream(summarize_top5_reuslts(formatted_top5_results,user_query))
+            response = st.write_stream(summarize_top_reuslts(formatted_top_results,user_query))
 
         st.session_state.chat_history.append(AIMessage(content=response))
+
+        download_list.append('**News Feed Assistant**: ' + response)
+        download_txt = '\n\n'.join(download_list)
+        
+        if download_list:
+            st.download_button('Download',download_txt,file_name=f"{user_query}-{datetime.now().strftime('%Y%m%d%H%M%S')}.md")
+
