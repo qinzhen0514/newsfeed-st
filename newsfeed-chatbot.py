@@ -3,6 +3,7 @@ import os
 import json
 from scipy import spatial
 from datetime import date, timedelta, datetime
+from dateutil.relativedelta import relativedelta
 from newsapi import NewsApiClient
 from newspaper import Article
 from newspaper import Config
@@ -30,7 +31,7 @@ format_instructions = parser.get_format_instructions()
 # Date variables
 today = datetime.today()
 prev_day = (today - timedelta(days=0)).strftime('%Y-%m-%d')
-prev_30day = (today - timedelta(days=29)).strftime('%Y-%m-%d')
+prev_30day = (today - relativedelta(months=+1)).strftime('%Y-%m-%d')
 
 # Helper Functions
 def cosine_similarity(x,y):
@@ -132,7 +133,7 @@ def get_relevant_queries(user_query):
 
                 The topic is: {user_query}\
 
-                Your goal is to generate many potential search queries that are relevant to the topic and valid in year 2024. To do this:\
+                Your goal is to generate many potential search queries that are relevant to the topic and valid in year 2025. To do this:\
                 - Use different keywords and phrases related to the topic \
                 - Vary the specificity of your queries, making some more narrow and others more broad\
                 - Be creative and come up with as many distinct query ideas as you can\
